@@ -1,39 +1,36 @@
 # coding: utf-8
 
 from flask import Flask, request, make_response, redirect, abort
-import json
-import re
+from users import Users
 
-# 外部ファイルからユーザ情報を取得
-f = open('users.json' , 'r')
-users_list = json.load(f)
+Users.initDatabase()
+
+Users.register("hogehoge", "fugafuga", "/private,/hogehoge")
 
 app = Flask(__name__)
 
-@app.route('/auth/register', methods=['GET', 'POST'])
+@app.route('/auth/users', methods=['GET', 'POST'])
 def register():    
     if request.method == 'POST':
-        # PathListを配列に整形
-        pathlist = re.split(',\r*\n*', request.form['pathlist'])
-        # 配列にユーザ情報を追加
-        users_list.append({'name': request.form['name'], 'password': request.form['password'], 'pathlist': pathlist})
+        # ユーザ情報を追加
+        result = Users.register(request.form['name'], request.form['password'], request.form['pathlist'])
+        if result:
+            # response = make_response(redirect('/'))
+            # return response
+            return 'success!', 201
+        else:
+            return 'Conflict', 409
         
-        with open("users.json", "w") as f:
-            json.dump(users_list, f)
-
-        response = make_response(redirect('/'))
-        return response
     else:
         return '', 200
 
 @app.route('/auth/is_auth')
 def is_auth():
     if request.authorization:
-        user = [s for s in users_list if request.authorization['username'] == s['name'] and request.authorization['password'] == s['password']][0]
-        if user:
+        user = Users.find(request.authorization['username'])
+        if user and user.auth(request.authorization['password']):
             origin_url = request.headers.get("X-Original-URI")
-            app.logger.debug(str(user['pathlist']))
-            if [l for l in user['pathlist'] if origin_url.startswith(l)]:
+            if [l for l in user.getPathList() if origin_url.startswith(l)]:
                 return '', 200
             else:
                 return '', 403
