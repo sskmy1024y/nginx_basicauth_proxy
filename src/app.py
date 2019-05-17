@@ -1,39 +1,78 @@
 # coding: utf-8
 
 from flask import Flask, request, make_response, redirect, abort
+from users import Users
 import json
-import re
 
-# 外部ファイルからユーザ情報を取得
-f = open('users.json' , 'r')
-users_list = json.load(f)
+Users.initDatabase()
+
+Users.register('admin', 'root', '/')
 
 app = Flask(__name__)
 
-@app.route('/auth/register', methods=['GET', 'POST'])
-def register():    
-    if request.method == 'POST':
-        # PathListを配列に整形
-        pathlist = re.split(',\r*\n*', request.form['pathlist'])
-        # 配列にユーザ情報を追加
-        users_list.append({'name': request.form['name'], 'password': request.form['password'], 'pathlist': pathlist})
-        
-        with open("users.json", "w") as f:
-            json.dump(users_list, f)
-
-        response = make_response(redirect('/'))
-        return response
+@app.route('/auth/users', methods=['GET', 'POST'])
+def register():
+    if is_auth()[1] == 200:
+        if request.method == 'POST':
+            # ユーザ情報を追加
+            params = request.get_json()
+            result = Users.register(params['name'], params['password'], params['pathlist'])
+            if result:
+                return json.dumps(result.toJSON()), 201
+            else:
+                return json.dumps('409 Conflict'), 409
+            
+        elif request.method == 'GET':
+            return Users.getUserLists(), 200
     else:
-        return '', 200
+        return json.dumps('403 Forbidden'), 403
+
+
+@app.route('/auth/users/<int:usersid>', methods=['GET', 'PUT', 'DELETE'])
+def show_users(usersid):
+    if is_auth()[1] == 200:
+        if request.method == 'GET':
+            user = Users.findById(usersid)
+            if user:
+                return json.dumps(user.toJSON())
+            else:
+                return json.dumps('User is not found'), 404
+
+        elif request.method == 'PUT':     
+            user = Users.findById(usersid)
+            if user:
+                params = request.get_json()
+                user.setName(params['name']) if "name" in params else None
+                user.setPassword(params['password']) if "password" in params else None
+                user.setPathList(params['pathlist']) if "pathlist" in params else None
+
+                if user.update():
+                    return '', 204
+                else:
+                    return json.dumps('409 Conflict'), 409
+            else:
+                return json.dumps('User is not found'), 404
+            
+        elif request.method == 'DELETE':
+            user = Users.findById(usersid)
+            if user.delete():
+                return '', 204
+            else:
+                return json.dumps('409 Conflict'), 409
+
+                
+    else:
+        return json.dumps('403 Forbidden'), 403
+    
+
 
 @app.route('/auth/is_auth')
 def is_auth():
     if request.authorization:
-        user = [s for s in users_list if request.authorization['username'] == s['name'] and request.authorization['password'] == s['password']][0]
-        if user:
+        user = Users.find(request.authorization['username'])
+        if user and user.auth(request.authorization['password']):
             origin_url = request.headers.get("X-Original-URI")
-            app.logger.debug(str(user['pathlist']))
-            if [l for l in user['pathlist'] if origin_url.startswith(l)]:
+            if [l for l in user.getPathList() if origin_url.startswith(l)]:
                 return '', 200
             else:
                 return '', 403
